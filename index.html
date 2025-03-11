@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fire Emergency AR Game - 3D Version</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ar.js/3.3.0/AR.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -373,6 +375,12 @@
         let gameActive = false;
         let activeFire = null;
         let selectedExtinguisher = null;
+
+        // Ground detection variables
+let raycaster;
+let groundDetected = false;
+let groundPosition = new THREE.Vector3();
+let groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0)); // Ground is XZ plane
         
         // 3D variables
         let scene, camera, renderer;
@@ -437,40 +445,142 @@
         ];
         
         // Initialize Three.js scene
-        function initThreeJS() {
-            // Create scene
-            scene = new THREE.Scene();
-            
-            // Create camera
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.z = 5;
-            
-            // Create renderer
-            renderer = new THREE.WebGLRenderer({ 
-                canvas: threeCanvas,
-                alpha: true 
-            });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setClearColor(0x000000, 0);
-            
-            // Add lights
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-            scene.add(ambientLight);
-            
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            directionalLight.position.set(1, 1, 1);
-            scene.add(directionalLight);
-            
-            // Start animation loop
-            animate();
-            
-            // Handle resize
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            });
-        }
+       // Initialize Three.js scene
+function initThreeJS() {
+    // Create scene
+    scene = new THREE.Scene();
+    
+    // Create camera
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 5;
+    
+    // Create renderer
+    renderer = new THREE.WebGLRenderer({ 
+        canvas: threeCanvas,
+        alpha: true,
+        antialias: true
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x000000, 0);
+    renderer.shadowMap.enabled = true;
+    
+    // Initialize raycaster for ground detection
+    raycaster = new THREE.Raycaster();
+    
+    // Add lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(1, 1, 1);
+    directionalLight.castShadow = true;
+    scene.add(directionalLight);
+    
+    // Create a plane for shadow receiving (invisible)
+    const shadowPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(20, 20),
+        new THREE.ShadowMaterial({ opacity: 0.5 })
+    );
+    shadowPlane.rotation.x = -Math.PI / 2;
+    shadowPlane.position.y = -0.01;
+    shadowPlane.receiveShadow = true;
+    scene.add(shadowPlane);
+    
+    // Start animation loop
+    animate();
+    
+    // Handle resize
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+    
+    // Detect ground on app start
+    setTimeout(detectGround, 1000);
+}
+
+// AR hit test controller
+let hitTestSource = null;
+let hitTestSourceRequested = false;
+let reticle;
+
+// Initialize AR session
+function initARSession() {
+    const session = renderer.xr.getSession();
+    
+    // Create reticle (visual indicator for detected ground)
+    reticle = new THREE.Mesh(
+        new THREE.RingGeometry(0.15, 0.2, 32),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    reticle.rotation.x = -Math.PI / 2;
+    reticle.matrixAutoUpdate = false;
+    reticle.visible = false;
+    scene.add(reticle);
+    
+    // Set up hit testing
+    session.requestReferenceSpace('viewer').then(function (referenceSpace) {
+        session.requestHitTestSource({ space: referenceSpace }).then(function (source) {
+            hitTestSource = source;
+        });
+    });
+    
+    session.addEventListener('end', function () {
+        hitTestSourceRequested = false;
+        hitTestSource = null;
+    });
+    
+    hitTestSourceRequested = true;
+}
+
+// Detect ground using raycasting
+function detectGround() {
+    if (!raycaster) return false;
+    
+    // Cast ray from camera down to detect ground
+    raycaster.set(
+        new THREE.Vector3(0, 2, 0), 
+        new THREE.Vector3(0, -1, 0).normalize()
+    );
+    
+    const intersects = raycaster.intersectObjects(scene.children, true);
+    
+    if (intersects.length > 0) {
+        // Get the first intersection point
+        const intersect = intersects[0];
+        groundPosition.copy(intersect.point);
+        groundDetected = true;
+        return true;
+    }
+    
+    // If we're using AR and no real objects detected, use a plane at y=0
+    groundPosition.set(
+        (Math.random() - 0.5) * 5,  // Random X position
+        0,                          // Ground level
+        -2 - Math.random() * 3      // Random Z position
+    );
+    groundDetected = true;
+    
+    return true;
+}
+// Update the animation loop to include hit testing
+// Animation loop
+function animate() {
+    requestAnimationFrame(animate);
+    
+    // Check for ground detection if not already found
+    if (!groundDetected) {
+        detectGround();
+    }
+    
+    // Update animation mixer if exists
+    if (mixer) {
+        mixer.update(clock.getDelta());
+    }
+    
+    renderer.render(scene, camera);
+}
         
         // Load 3D models
         function loadModels() {
@@ -492,148 +602,629 @@
         
         // Create a simple fire model
         function createFireModel(color) {
-            const group = new THREE.Group();
-            
-            // Base of the fire
-            const baseGeometry = new THREE.CylinderGeometry(0.5, 1, 1, 8);
-            const baseMaterial = new THREE.MeshPhongMaterial({ 
-                color: color,
-                transparent: true,
-                opacity: 0.7,
-                emissive: color,
-                emissiveIntensity: 0.5
-            });
-            const base = new THREE.Mesh(baseGeometry, baseMaterial);
-            base.position.y = 0.5;
-            group.add(base);
-            
-            // Flames
-            const flameGeometry = new THREE.ConeGeometry(0.7, 2, 8);
-            const flameMaterial = new THREE.MeshPhongMaterial({ 
-                color: color,
-                transparent: true,
-                opacity: 0.9,
-                emissive: color,
-                emissiveIntensity: 0.8
-            });
-            const flame = new THREE.Mesh(flameGeometry, flameMaterial);
-            flame.position.y = 2;
-            group.add(flame);
-            
-            // Add flicker animation
-            const flickerAnimation = () => {
-                flame.scale.x = 0.8 + Math.random() * 0.4;
-                flame.scale.z = 0.8 + Math.random() * 0.4;
-                flame.position.y = 1.8 + Math.random() * 0.4;
-                
-                requestAnimationFrame(flickerAnimation);
-            };
-            flickerAnimation();
-            
-            // Hide initially
-            group.visible = false;
-            scene.add(group);
-            
-            return group;
-        }
+    const group = new THREE.Group();
+    
+    // Number of fire particles
+    const particleCount = 200;
+    const particles = new THREE.BufferGeometry();
+    
+    // Positions array (3 values per vertex)
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+    const sizes = new Float32Array(particleCount);
+    
+    // Color object for conversion
+    const colorObj = new THREE.Color(color);
+    
+    // Create positions for each particle
+    for (let i = 0; i < particleCount; i++) {
+        const i3 = i * 3;
         
-        // Create a simple extinguisher model
-        function createExtinguisherModel() {
-            const group = new THREE.Group();
-            
-            // Tank
-            const tankGeometry = new THREE.CylinderGeometry(0.3, 0.3, 1.2, 16);
-            const tankMaterial = new THREE.MeshPhongMaterial({ color: 0xcccccc });
-            const tank = new THREE.Mesh(tankGeometry, tankMaterial);
-            tank.position.y = 0;
-            group.add(tank);
-            
-            // Top
-            const topGeometry = new THREE.CylinderGeometry(0.15, 0.3, 0.3, 16);
-            const top = new THREE.Mesh(topGeometry, tankMaterial);
-            top.position.y = 0.75;
-            group.add(top);
-            
-            // Nozzle
-            const nozzleGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.5, 16);
-            const nozzle = new THREE.Mesh(nozzleGeometry, tankMaterial);
-            nozzle.position.y = 1;
-            nozzle.position.z = 0.3;
-            nozzle.rotation.x = Math.PI / 2;
-            group.add(nozzle);
-            
-            // Handle
-            const handleGeometry = new THREE.TorusGeometry(0.15, 0.04, 16, 16, Math.PI);
-            const handle = new THREE.Mesh(handleGeometry, tankMaterial);
-            handle.position.y = 0.3;
-            handle.position.z = -0.25;
-            handle.rotation.x = Math.PI / 2;
-            group.add(handle);
-            
-            // Hide initially
-            group.visible = false;
-            group.scale.set(0.5, 0.5, 0.5);
-            scene.add(group);
-            
-            return group;
-        }
+        // Random position in a cone shape
+        const radius = Math.random() * 0.5;
+        const angle = Math.random() * Math.PI * 2;
+        const height = Math.random() * 1.5;
         
-        // Create spray particles
-        function createSprayEffect(color) {
-            const particleCount = 50;
-            const particles = new THREE.Group();
+        positions[i3] = Math.cos(angle) * radius;
+        positions[i3 + 1] = height;
+        positions[i3 + 2] = Math.sin(angle) * radius;
+        
+        // Color gradient (more yellow/white at top)
+        const mixRatio = height / 1.5;
+        const fireColor = new THREE.Color(color);
+        fireColor.lerp(new THREE.Color(0xffff80), mixRatio);
+        
+        colors[i3] = fireColor.r;
+        colors[i3 + 1] = fireColor.g;
+        colors[i3 + 2] = fireColor.b;
+        
+        // Bigger particles at the bottom
+        sizes[i] = 0.1 + (1 - height / 1.5) * 0.2;
+    }
+    
+    // Add attributes to buffer geometry
+    particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    particles.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    // Create shader material for fire particles
+    const particleMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+            time: { value: 0.0 },
+            pointTexture: { 
+                value: new THREE.TextureLoader().load('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAsTAAALEwEAmpwYAAAFFmlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4gPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iQWRvYmUgWE1QIENvcmUgNS42LWMxNDIgNzkuMTYwOTI0LCAyMDE3LzA3LzEzLTAxOjA2OjM5ICAgICAgICAiPiA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPiA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtbG5zOmRjPSJodHRwOi8vcHVybC5vcmcvZGMvZWxlbWVudHMvMS4xLyIgeG1sbnM6cGhvdG9zaG9wPSJodHRwOi8vbnMuYWRvYmUuY29tL3Bob3Rvc2hvcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RFdnQ9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZUV2ZW50IyIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ0MgKFdpbmRvd3MpIiB4bXA6Q3JlYXRlRGF0ZT0iMjAyMC0wMy0yM1QxNDo0MDowNyswMTowMCIgeG1wOk1vZGlmeURhdGU9IjIwMjAtMDMtMjNUMTQ6NDM6MTUrMDE6MDAiIHhtcDpNZXRhZGF0YURhdGU9IjIwMjAtMDMtMjNUMTQ6NDM6MTUrMDE6MDAiIGRjOmZvcm1hdD0iaW1hZ2UvcG5nIiBwaG90b3Nob3A6Q29sb3JNb2RlPSIzIiBwaG90b3Nob3A6SUNDUHJvZmlsZT0ic1JHQiBJRUM2MTk2Ni0yLjEiIHhtcE1NOkluc3RhbmNlSUQ9InhtcC5paWQ6MzI0M2RjODQtYmRkOS0zMzRk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')
+            }
+        },
+        vertexShader: `
+            attribute float size;
+            attribute vec3 color;
+            varying vec3 vColor;
+            uniform float time;
             
-            for (let i = 0; i < particleCount; i++) {
-                const size = Math.random() * 0.05 + 0.02;
-                const geometry = new THREE.SphereGeometry(size);
-                const material = new THREE.MeshBasicMaterial({ 
-                    color: color,
-                    transparent: true,
-                    opacity: 0.7
-                });
+            void main() {
+                vColor = color;
                 
-                const particle = new THREE.Mesh(geometry, material);
-                // Position randomly in a cone shape
-                const angle = Math.random() * Math.PI * 2;
-                const radius = Math.random() * 0.1;
-                const distance = Math.random() * 2;
+                // Animate the fire
+                vec3 pos = position;
+                pos.x += sin(time * 2.0 + position.y * 4.0) * 0.1 * (1.0 - position.y);
+                pos.z += cos(time * 3.0 + position.y * 5.0) * 0.1 * (1.0 - position.y);
+                pos.y += sin(time * 5.0 + position.x * position.z) * 0.05;
                 
-                particle.position.x = Math.cos(angle) * radius;
-                particle.position.y = Math.sin(angle) * radius;
-                particle.position.z = -distance;
+                vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                gl_PointSize = size * (300.0 / -mvPosition.z);
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `,
+        fragmentShader: `
+            uniform sampler2D pointTexture;
+            varying vec3 vColor;
+            
+            void main() {
+                gl_FragColor = vec4(vColor, 1.0) * texture2D(pointTexture, gl_PointCoord);
                 
-                particles.add(particle);
-                
-                // Animate particles
-                animateParticle(particle, distance);
+                // Add glow effect
+                float intensity = pow(0.6 - length(gl_PointCoord - vec2(0.5)), 1.5);
+                gl_FragColor += vec4(vColor * intensity * 0.5, 0);
+            }
+        `,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        vertexColors: true
+    });
+    
+    const fireParticles = new THREE.Points(particles, particleMaterial);
+    group.add(fireParticles);
+    
+    // Add embers (small bright particles that rise)
+    const emberCount = 30;
+    const emberGroup = new THREE.Group();
+    group.add(emberGroup);
+    
+    // Create and animate embers
+    for (let i = 0; i < emberCount; i++) {
+        createEmber(emberGroup, color);
+    }
+    
+    // Add smoke
+    const smokeCount = 20;
+    const smokeGroup = new THREE.Group();
+    group.add(smokeGroup);
+    
+    // Create and animate smoke particles
+    for (let i = 0; i < smokeCount; i++) {
+        createSmoke(smokeGroup);
+    }
+    
+    // Update animation
+    function updateFire() {
+        if (!group.visible) return;
+        
+        // Update fire shader time uniform
+        particleMaterial.uniforms.time.value += 0.01;
+        
+        requestAnimationFrame(updateFire);
+    }
+    
+    updateFire();
+    
+    // Hide initially
+    group.visible = false;
+    scene.add(group);
+    
+    return group;
+}
+
+// Add appropriate fuel source based on fire type
+function addFuelSource(group, color) {
+    const fireType = Object.keys(fireModels).find(key => 
+        fireModels[key] === group || 
+        (fireModels[key] && fireModels[key].uuid === group.uuid)
+    );
+    
+    if (!fireType) return;
+    
+    let sourceGeometry, sourceMaterial;
+    
+    switch (fireType) {
+        case 'electrical':
+            // Electrical panel or device
+            sourceGeometry = new THREE.BoxGeometry(0.8, 0.4, 0.6);
+            sourceMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
+            break;
+        case 'gas':
+            // Gas canister
+            sourceGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 16);
+            sourceMaterial = new THREE.MeshPhongMaterial({ color: 0x888888 });
+            break;
+        case 'wood':
+            // Logs in a pile
+            sourceGeometry = new THREE.CylinderGeometry(0.2, 0.2, 1, 8);
+            sourceMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+            break;
+        case 'liquid':
+            // Puddle/container with liquid
+            sourceGeometry = new THREE.CylinderGeometry(0.6, 0.5, 0.3, 16);
+            sourceMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x3333FF,
+                transparent: true,
+                opacity: 0.7
+            });
+            break;
+        case 'metal':
+            // Metal piece
+            sourceGeometry = new THREE.BoxGeometry(0.7, 0.2, 0.7);
+            sourceMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xAAAAAA,
+                metalness: 0.8,
+                roughness: 0.2
+            });
+            break;
+        default:
+            // Generic source
+            sourceGeometry = new THREE.BoxGeometry(0.6, 0.2, 0.6);
+            sourceMaterial = new THREE.MeshPhongMaterial({ color: 0x555555 });
+    }
+    
+    const source = new THREE.Mesh(sourceGeometry, sourceMaterial);
+    source.position.y = -0.15;
+    source.castShadow = true;
+    source.receiveShadow = true;
+    group.add(source);
+}
+
+// Start fire effects
+function startFireEffects(fireType) {
+    const fireModel = fireModels[fireType];
+    if (!fireModel) return;
+    
+    // Clear existing particles
+    clearFireParticles(fireModel);
+    
+    // Fire color based on type
+    let fireColor;
+    switch (fireType) {
+        case 'electrical': fireColor = 0x66ccff; break; // Blue electrical fire
+        case 'gas': fireColor = 0xff9900; break;        // Orange gas fire
+        case 'wood': fireColor = 0xff3300; break;       // Red wood fire
+        case 'liquid': fireColor = 0x9900ff; break;     // Purple liquid fire
+        case 'metal': fireColor = 0xffffff; break;      // White metal fire
+        default: fireColor = 0xff6600;                  // Default orange
+    }
+    
+    // Create new fire particles
+    createFireParticles(fireModel, fireColor);
+    
+    // Create smoke
+    createSmokeParticles(fireModel);
+    
+    // Create embers (only for wood and certain fires)
+    if (fireType === 'wood' || fireType === 'gas') {
+        createEmberParticles(fireModel, fireColor);
+    }
+}
+
+// Clear existing particles
+function clearFireParticles(fireModel) {
+    // Find particle containers
+    fireModel.children.forEach(child => {
+        if (child instanceof THREE.Group) {
+            while (child.children.length > 0) {
+                const particle = child.children[0];
+                child.remove(particle);
+                if (particle.geometry) particle.geometry.dispose();
+                if (particle.material) particle.material.dispose();
+            }
+        }
+    });
+}
+
+// Create fire particles
+function createFireParticles(fireModel, color) {
+    // Find fire particles container
+    let fireParticles;
+    fireModel.children.forEach(child => {
+        if (child instanceof THREE.Group && !fireParticles) {
+            fireParticles = child;
+        }
+    });
+    
+    if (!fireParticles) return;
+    
+    // Create multiple flames
+    const particleCount = 15;
+    
+    for (let i = 0; i < particleCount; i++) {
+        const size = Math.random() * 0.5 + 0.2;
+        const flameGeometry = new THREE.ConeGeometry(size/2, size, 8);
+        
+        // Gradient color - yellow at bottom, fire color at top
+        const flameMaterial = new THREE.MeshBasicMaterial({ 
+            color: i % 3 === 0 ? 0xffff00 : color,
+            transparent: true,
+            opacity: 0.7 + Math.random() * 0.3
+        });
+        
+        const flame = new THREE.Mesh(flameGeometry, flameMaterial);
+        
+        // Position randomly around center
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * 0.3;
+        flame.position.x = Math.cos(angle) * radius;
+        flame.position.z = Math.sin(angle) * radius;
+        flame.position.y = 0.1 + Math.random() * 0.2;
+        
+        // Random rotation
+        flame.rotation.y = Math.random() * Math.PI * 2;
+        
+        // Add to container
+        fireParticles.add(flame);
+        
+        // Animate this flame
+        animateFlame(flame);
+    }
+}
+
+// Animate individual flame
+function animateFlame(flame) {
+    const originalY = flame.position.y;
+    const originalScale = {x: flame.scale.x, y: flame.scale.y, z: flame.scale.z};
+    const lifespan = 1000 + Math.random() * 1000; // 1-2 seconds
+    const startTime = Date.now();
+    
+    function updateFlame() {
+        const elapsed = Date.now() - startTime;
+        const lifeRatio = elapsed / lifespan;
+        
+        if (lifeRatio < 1) {
+            // Rise up
+            flame.position.y = originalY + lifeRatio * 1.0;
+            
+            // Random flickering
+            const flicker = Math.sin(elapsed * 0.01) * 0.1 + 0.9;
+            flame.scale.x = originalScale.x * flicker;
+            flame.scale.z = originalScale.z * flicker;
+            
+            // Fade out near the end
+            if (lifeRatio > 0.7) {
+                flame.material.opacity = 1 - ((lifeRatio - 0.7) / 0.3);
             }
             
-            return particles;
-        }
-        
-        // Animate individual spray particle
-        function animateParticle(particle, startDistance) {
-            const speed = Math.random() * 0.1 + 0.05;
-            let distance = startDistance;
+            requestAnimationFrame(updateFlame);
+        } else {
+            // Reset for reuse
+            flame.position.y = originalY;
+            flame.scale.set(originalScale.x, originalScale.y, originalScale.z);
+            flame.material.opacity = 0.7 + Math.random() * 0.3;
             
-            function update() {
-                distance += speed;
-                particle.position.z = -distance;
-                
-                // Fade out as it moves
-                particle.material.opacity = Math.max(0, 0.7 - distance * 0.2);
-                
-                if (distance < 4) {
-                    requestAnimationFrame(update);
-                } else {
-                    particle.parent.remove(particle);
-                    particle.material.dispose();
-                    particle.geometry.dispose();
-                }
+            // Start again
+            setTimeout(() => {
+                requestAnimationFrame(updateFlame);
+            }, Math.random() * 200);
+        }
+    }
+    
+    updateFlame();
+}
+
+// Create smoke particles
+function createSmokeParticles(fireModel) {
+    // Find smoke particles container
+    let smokeParticles;
+    fireModel.children.forEach(child => {
+        if (child instanceof THREE.Group && child !== fireModel.children[0]) {
+            smokeParticles = child;
+        }
+    });
+    
+    if (!smokeParticles) return;
+    
+    // Create smoke particles
+    const particleCount = 10;
+    
+    for (let i = 0; i < particleCount; i++) {
+        const size = Math.random() * 0.4 + 0.2;
+        const smokeGeometry = new THREE.SphereGeometry(size, 8, 8);
+        const smokeMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x666666,
+            transparent: true,
+            opacity: 0.2 + Math.random() * 0.2
+        });
+        
+        const smoke = new THREE.Mesh(smokeGeometry, smokeMaterial);
+        
+        // Position above fire
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * 0.3;
+        smoke.position.x = Math.cos(angle) * radius;
+        smoke.position.z = Math.sin(angle) * radius;
+        smoke.position.y = 0.8 + Math.random() * 0.3;
+        
+        // Add to container
+        smokeParticles.add(smoke);
+        
+        // Animate this smoke particle
+        animateSmoke(smoke);
+    }
+}
+
+// Animate individual smoke particle
+function animateSmoke(smoke) {
+    const originalY = smoke.position.y;
+    const originalScale = {x: smoke.scale.x, y: smoke.scale.y, z: smoke.scale.z};
+    const lifespan = 2000 + Math.random() * 1000; // 2-3 seconds
+    const startTime = Date.now();
+    
+    function updateSmoke() {
+        const elapsed = Date.now() - startTime;
+        const lifeRatio = elapsed / lifespan;
+        
+        if (lifeRatio < 1) {
+            // Rise up and drift
+            smoke.position.y = originalY + lifeRatio * 2.0;
+            smoke.position.x += Math.sin(elapsed * 0.001) * 0.01;
+            smoke.position.z += Math.cos(elapsed * 0.001) * 0.01;
+            
+            // Expand
+            const expansion = 1 + lifeRatio * 1.5;
+            smoke.scale.set(
+                originalScale.x * expansion,
+                originalScale.y * expansion,
+                originalScale.z * expansion
+            );
+            
+            // Fade out
+            smoke.material.opacity = 0.3 * (1 - lifeRatio);
+            
+            requestAnimationFrame(updateSmoke);
+        } else {
+            // Reset for reuse
+            smoke.position.y = originalY;
+            smoke.scale.set(originalScale.x, originalScale.y, originalScale.z);
+            smoke.material.opacity = 0.2 + Math.random() * 0.2;
+            
+            // Start again
+            setTimeout(() => {
+                requestAnimationFrame(updateSmoke);
+            }, Math.random() * 500);
+        }
+    }
+    
+    updateSmoke();
+}
+
+// Create ember particles (for wood fires)
+function createEmberParticles(fireModel, color) {
+    // Find ember particles container
+    let emberParticles;
+    fireModel.children.forEach(child => {
+        if (child instanceof THREE.Group && child !== fireModel.children[0] && child !== fireModel.children[1]) {
+            emberParticles = child;
+        }
+    });
+    
+    if (!emberParticles) return;
+    
+    // Create embers
+    const particleCount = 5;
+    
+    for (let i = 0; i < particleCount; i++) {
+        const size = Math.random() * 0.05 + 0.02;
+        const emberGeometry = new THREE.SphereGeometry(size, 4, 4);
+        const emberMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xff3300,
+            emissive: 0xff0000,
+            emissiveIntensity: 1
+        });
+        
+        const ember = new THREE.Mesh(emberGeometry, emberMaterial);
+        
+        // Position at base of fire
+        ember.position.y = 0.1;
+        
+        // Add to container
+        emberParticles.add(ember);
+        
+        // Animate this ember
+        animateEmber(ember);
+    }
+}
+
+// Animate individual ember
+function animateEmber(ember) {
+    const lifespan = 1500 + Math.random() * 1000; // 1.5-2.5 seconds
+    const startTime = Date.now();
+    
+    // Random trajectory
+    const velocityX = (Math.random() - 0.5) * 0.01;
+    const velocityY = 0.01 + Math.random() * 0.02;
+    const velocityZ = (Math.random() - 0.5) * 0.01;
+    
+    function updateEmber() {
+        const elapsed = Date.now() - startTime;
+        const lifeRatio = elapsed / lifespan;
+        
+        if (lifeRatio < 1) {
+            // Move ember
+            ember.position.x += velocityX;
+            ember.position.y += velocityY;
+            ember.position.z += velocityZ;
+            
+            // Gravity effect - slow down vertical velocity
+            const gravityEffect = 0.0003;
+            velocityY.y -= gravityEffect;
+            
+            // Fade out near the end
+            if (lifeRatio > 0.7) {
+                ember.material.opacity = 1 - ((lifeRatio - 0.7) / 0.3);
             }
             
-            update();
+            requestAnimationFrame(updateEmber);
+        } else {
+            // Reset for reuse
+            ember.position.set(0, 0.1, 0);
+            ember.material.opacity = 1.0;
+            
+            // Start again after delay
+            setTimeout(() => {
+                requestAnimationFrame(updateEmber);
+            }, Math.random() * 1000);
         }
+    }
+    
+    updateEmber();
+}
+
+// Create ember particle
+function createEmber(group, color) {
+    const size = Math.random() * 0.03 + 0.01;
+    const geometry = new THREE.SphereGeometry(size);
+    const material = new THREE.MeshBasicMaterial({ 
+        color: new THREE.Color(color).lerp(new THREE.Color(0xffff80), 0.5),
+        transparent: true,
+        opacity: 0.7
+    });
+    
+    const ember = new THREE.Mesh(geometry, material);
+    
+    // Initial position
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.random() * 0.3;
+    ember.position.set(
+        Math.cos(angle) * radius,
+        Math.random() * 0.1,
+        Math.sin(angle) * radius
+    );
+    
+    group.add(ember);
+    
+    // Animate ember
+    animateEmber(ember);
+}
+
+// Animate ember particle
+function animateEmber(ember) {
+    const startY = ember.position.y;
+    const speed = Math.random() * 0.02 + 0.01;
+    const maxHeight = Math.random() * 2 + 1;
+    
+    function update() {
+        if (!ember.parent) return;
+        
+        ember.position.y += speed;
+        ember.position.x += (Math.random() - 0.5) * 0.01;
+        ember.position.z += (Math.random() - 0.5) * 0.01;
+        
+        // Fade out as it rises
+        ember.material.opacity = Math.max(0, 1 - (ember.position.y / maxHeight));
+        
+        if (ember.position.y < startY + maxHeight) {
+            requestAnimationFrame(update);
+        } else {
+            // Reset ember for reuse
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * 0.3;
+            ember.position.set(
+                Math.cos(angle) * radius,
+                Math.random() * 0.1,
+                Math.sin(angle) * radius
+            );
+            ember.material.opacity = 0.7;
+            animateEmber(ember);
+        }
+    }
+    
+    update();
+}
+
+// Create smoke particle
+function createSmoke(group) {
+    const size = Math.random() * 0.2 + 0.2;
+    const geometry = new THREE.PlaneGeometry(size, size);
+    const material = new THREE.MeshBasicMaterial({ 
+        color: 0x666666,
+        transparent: true,
+        opacity: Math.random() * 0.2 + 0.05
+    });
+    
+    const smoke = new THREE.Mesh(geometry, material);
+    smoke.rotation.z = Math.random() * Math.PI;
+    
+    // Initial position
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.random() * 0.3;
+    smoke.position.set(
+        Math.cos(angle) * radius,
+        Math.random() * 0.5 + 0.5,
+        Math.sin(angle) * radius
+    );
+    
+    group.add(smoke);
+    
+    // Animate smoke
+    animateSmoke(smoke);
+}
+
+// Animate smoke particle
+function animateSmoke(smoke) {
+    const startY = smoke.position.y;
+    const speed = Math.random() * 0.01 + 0.005;
+    const maxHeight = Math.random() * 2 + 2;
+    
+    function update() {
+        if (!smoke.parent) return;
+        
+        smoke.position.y += speed;
+        smoke.position.x += (Math.random() - 0.5) * 0.005;
+        smoke.position.z += (Math.random() - 0.5) * 0.005;
+        smoke.rotation.z += Math.random() * 0.01;
+        
+        // Fade out as it rises
+        smoke.material.opacity = Math.max(0, smoke.material.opacity - 0.001);
+        
+        // Increase size slightly
+        smoke.scale.x += 0.001;
+        smoke.scale.y += 0.001;
+        
+        if (smoke.position.y < startY + maxHeight && smoke.material.opacity > 0) {
+            requestAnimationFrame(update);
+        } else {
+            // Reset smoke for reuse
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * 0.3;
+            smoke.position.set(
+                Math.cos(angle) * radius,
+                Math.random() * 0.5 + 0.5,
+                Math.sin(angle) * radius
+            );
+            smoke.scale.set(1, 1, 1);
+            smoke.material.opacity = Math.random() * 0.2 + 0.05;
+            animateSmoke(smoke);
+        }
+    }
+    
+    update();
+}
         
         // Animation loop
         function animate() {
@@ -648,25 +1239,34 @@
         }
         
         // Initialize game
-        function initGame() {
-            // Reset game state
-            currentLevel = 1;
-            score = 0;
-            lives = 3;
-            gameActive = true;
-            selectedExtinguisher = null;
-            
-            // Update UI
-            updateLevel();
-            updateScore();
-            updateLives();
-            
-            // Hide use button
-            useExtinguisherBtn.style.display = 'none';
-            
-            // Start first round
+        // Initialize game
+function initGame() {
+    // Reset game state
+    currentLevel = 1;
+    score = 0;
+    lives = 3;
+    gameActive = true;
+    selectedExtinguisher = null;
+    
+    // Update UI
+    updateLevel();
+    updateScore();
+    updateLives();
+    
+    // Hide use button
+    useExtinguisherBtn.style.display = 'none';
+    
+    // Detect ground first, then spawn fire
+    if (detectGround()) {
+        spawnFire();
+    } else {
+        // If no ground detected yet, wait and try again
+        setTimeout(() => {
+            detectGround();
             spawnFire();
-        }
+        }, 1000);
+    }
+}
         
         // Start camera
         async function startCamera() {
@@ -704,43 +1304,49 @@
         }
         
         // Spawn a new fire
-        function spawnFire() {
-            if (!gameActive) return;
-            
-            // Hide all fire models
-            Object.values(fireModels).forEach(model => {
-                model.visible = false;
-            });
-            
-            // Hide extinguisher model
-            if (extinguisherModel) {
-                extinguisherModel.visible = false;
-            }
-            
-            // Pick a random fire type, but weight towards different fires in higher levels
-            let availableFires = fireTypes;
-            if (currentLevel <= 2) {
-                // Only basic fires in early levels
-                availableFires = fireTypes.slice(0, 3);
-            }
-            
-            // Select random fire type
-            const randomIndex = Math.floor(Math.random() * availableFires.length);
-            activeFire = availableFires[randomIndex];
-            
-            // Position the 3D fire model randomly in the scene
-            const fireModel = fireModels[activeFire.type];
-            fireModel.visible = true;
-            
-            // Random position in view
-            fireModel.position.x = (Math.random() - 0.5) * 5;
-            fireModel.position.y = (Math.random() - 0.5) * 3;
-            fireModel.position.z = -2 - Math.random() * 3;
-            
-            // Scale based on level (smaller fires at higher levels)
-            const scale = Math.max(0.6, 1 - (currentLevel * 0.05));
-            fireModel.scale.set(scale, scale, scale);
-        }
+function spawnFire() {
+    if (!gameActive) return;
+    
+    // Hide all fire models
+    Object.values(fireModels).forEach(model => {
+        model.visible = false;
+    });
+    
+    // Hide extinguisher model
+    if (extinguisherModel) {
+        extinguisherModel.visible = false;
+    }
+    
+    // Pick a random fire type, but weight towards different fires in higher levels
+    let availableFires = fireTypes;
+    if (currentLevel <= 2) {
+        // Only basic fires in early levels
+        availableFires = fireTypes.slice(0, 3);
+    }
+    
+    // Select random fire type
+    const randomIndex = Math.floor(Math.random() * availableFires.length);
+    activeFire = availableFires[randomIndex];
+    
+    // Position the 3D fire model on detected ground
+    const fireModel = fireModels[activeFire.type];
+    
+    if (groundDetected) {
+        // Place fire at detected ground position
+        fireModel.position.copy(groundPosition);
+        fireModel.visible = true;
+        
+        // Scale based on level (smaller fires at higher levels)
+        const scale = Math.max(0.6, 1 - (currentLevel * 0.05));
+        fireModel.scale.set(scale, scale, scale);
+        
+        // Start fire animations
+        startFireEffects(activeFire.type);
+    } else {
+        // If no ground detected, try again after a delay
+        setTimeout(spawnFire, 1000);
+    }
+}
         
         // Handle extinguisher selection
         function handleExtinguisherSelection(e) {
