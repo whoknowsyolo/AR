@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebAR Fire Extinguisher Game</title>
+    
+    <!-- A-Frame & AR.js -->
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://cdn.rawgit.com/jeromeetienne/AR.js/1.7.2/aframe-ar.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; text-align: center; }
+        #message { position: absolute; top: 20px; width: 100%; font-size: 20px; font-weight: bold; color: white; }
+    </style>
+</head>
+<body>
+    <div id="message">🔥 Swipe to throw the extinguisher!</div>
+
+    <a-scene embedded arjs>
+        
+        <!-- Camera -->
+        <a-marker-camera preset="hiro"></a-marker-camera>
+
+        <!-- Fires -->
+        <a-entity id="wood-fire" position="-1 1 -3">
+            <a-entity particle-system="preset: dust; color: red, orange, yellow; particleCount: 500"></a-entity>
+            <a-box color="brown" depth="0.5" height="1" width="1"></a-box>
+        </a-entity>
+
+        <a-entity id="gas-fire" position="0 1 -3">
+            <a-entity particle-system="preset: dust; color: red, yellow; particleCount: 500"></a-entity>
+            <a-box color="orange" depth="0.5" height="1" width="1"></a-box>
+        </a-entity>
+
+        <a-entity id="electrical-fire" position="1 1 -3">
+            <a-entity particle-system="preset: dust; color: purple, blue; particleCount: 500"></a-entity>
+            <a-box color="purple" depth="0.5" height="1" width="1"></a-box>
+        </a-entity>
+
+        <!-- Fire Extinguishers -->
+        <a-entity id="water-extinguisher" position="-1 0.5 -1">
+            <a-box color="blue" depth="0.3" height="0.7" width="0.3"></a-box>
+        </a-entity>
+
+        <a-entity id="sand-extinguisher" position="0 0.5 -1">
+            <a-box color="yellow" depth="0.3" height="0.7" width="0.3"></a-box>
+        </a-entity>
+
+        <a-entity id="co2-extinguisher" position="1 0.5 -1">
+            <a-box color="black" depth="0.3" height="0.7" width="0.3"></a-box>
+        </a-entity>
+
+    </a-scene>
+
+    <script>
+        let startX, startY, endX, endY;
+
+        document.addEventListener("touchstart", (e) => {
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+        });
+
+        document.addEventListener("touchend", (e) => {
+            endX = e.changedTouches[0].clientX;
+            endY = e.changedTouches[0].clientY;
+
+            let deltaX = endX - startX;
+            let deltaY = endY - startY;
+
+            if (Math.abs(deltaY) > Math.abs(deltaX)) {
+                let selectedExtinguisher = detectSelectedExtinguisher(startX);
+                if (selectedExtinguisher) {
+                    throwExtinguisher(selectedExtinguisher);
+                }
+            }
+        });
+
+        function detectSelectedExtinguisher(x) {
+            if (x < window.innerWidth / 3) return "water-extinguisher";
+            if (x > (window.innerWidth / 3) * 2) return "co2-extinguisher";
+            return "sand-extinguisher";
+        }
+
+        function throwExtinguisher(extinguisherId) {
+            let extinguisher = document.getElementById(extinguisherId);
+            let fireType = getFireType(extinguisherId);
+
+            extinguisher.setAttribute("animation", "property: position; to: 0 1 -3; dur: 1000; easing: linear");
+
+            setTimeout(() => {
+                if (fireType) {
+                    document.getElementById(fireType).setAttribute("visible", false);
+                    showMessage("✅ Correct! Fire Extinguished.");
+                } else {
+                    showMessage("❌ Wrong Extinguisher! Try Again.");
+                }
+                resetExtinguisher(extinguisher);
+            }, 1000);
+        }
+
+        function getFireType(extinguisherId) {
+            if (extinguisherId === "water-extinguisher") return "wood-fire";
+            if (extinguisherId === "sand-extinguisher") return "gas-fire";
+            if (extinguisherId === "co2-extinguisher") return "electrical-fire";
+            return null;
+        }
+
+        function resetExtinguisher(extinguisher) {
+            setTimeout(() => {
+                extinguisher.setAttribute("position", extinguisher.getAttribute("data-original-position"));
+            }, 500);
+        }
+
+        function showMessage(text) {
+            let messageBox = document.getElementById("message");
+            messageBox.innerText = text;
+            setTimeout(() => {
+                messageBox.innerText = "🔥 Swipe to throw the extinguisher!";
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
